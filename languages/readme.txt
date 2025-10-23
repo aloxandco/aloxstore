@@ -1,0 +1,1 @@
+Translation files go here (aloxstore.pot, .po, .mo).
