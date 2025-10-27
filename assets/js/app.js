@@ -130,7 +130,7 @@
         }
     });
 
-    // CART: proceed to Checkout page (not Stripe yet)
+    // CART: proceed to Checkout page
     document.addEventListener('click', function (e) {
         var btn = e.target.closest('.alx-checkout');
         if (!btn) return;
@@ -140,61 +140,69 @@
         window.location.href = g.checkout_url || '/checkout';
     });
 
-    // CHECKOUT FORM: save customer → create session → redirect to Stripe
+    // Collect billing + shipping fields
     function getFormData(form) {
-        var keys = [
-            'first_name', 'last_name', 'email', 'company',
-            'address_1', 'address_2', 'postcode', 'city',
-            'country', 'telephone'
-        ];
-        var out = {};
-        keys.forEach(function (k) {
-            var el = form.querySelector('[name="' + k + '"]');
-            out[k] = el ? el.value.trim() : '';
-        });
-        return out;
+        const data = {};
+        new FormData(form).forEach((value, key) => data[key] = value.trim());
+        return data;
     }
 
+    // CHECKOUT: Save customer + create Stripe session
     document.addEventListener('click', async function (e) {
-        var btn = e.target.closest('.alx-checkout-submit');
+        const btn = e.target.closest('.alx-checkout-submit');
         if (!btn) return;
 
-        var form = btn.closest('form.alx-checkout-form');
+        const form = btn.closest('form.alx-checkout-form');
         if (!form) return;
 
         e.preventDefault();
-        var payload = getFormData(form);
+        if (btn.disabled) return;
 
-        var required = [
-            'first_name', 'last_name', 'email',
-            'address_1', 'postcode', 'city',
-            'country', 'telephone'
+        const payload = getFormData(form);
+
+        // Required billing fields
+        const required = [
+            'billing_first_name', 'billing_last_name', 'billing_email',
+            'billing_address_1', 'billing_postcode', 'billing_city',
+            'billing_country', 'billing_phone'
         ];
 
-        for (var i = 0; i < required.length; i++) {
+        for (let i = 0; i < required.length; i++) {
             if (!payload[required[i]]) {
                 alert('Please complete all required fields.');
                 return;
             }
         }
 
+        // 🔄 Show spinner and disable button
+        const originalHTML = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `
+            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+            Processing...
+        `;
+
         try {
-            // 1) Save customer (creates/updates account, logs in, stores on cart)
+            // 1️⃣ Save customer info (creates or updates WP + Stripe)
             await rest('checkout/customer', 'POST', payload);
 
-            // 2) Create Stripe Checkout Session (server will include customer meta)
-            var out = await rest('checkout', 'POST', {});
+            // 2️⃣ Create Stripe Checkout Session
+            const out = await rest('checkout', 'POST', {});
             if (out && out.url) {
                 window.location.href = out.url;
             } else {
-                alert('Checkout error.');
+                alert('Checkout error: could not create Stripe session.');
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
             }
         } catch (err) {
-            console.error('[AloxStore] checkout form error:', err);
+            console.error('[AloxStore] checkout error:', err);
             alert(err.status === 403
                 ? 'Session expired. Refresh and try again.'
-                : 'Could not start checkout.'
-            );
+                : (err.payload?.message || 'Could not start checkout.')
+        );
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
         }
     });
 
