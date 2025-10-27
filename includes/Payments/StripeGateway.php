@@ -45,8 +45,13 @@ class StripeGateway implements PaymentGatewayInterface {
 
         $mode = get_option('alx_mode', 'test');
         $sk   = ($mode === 'live') ? get_option('alx_stripe_live_sk', '') : get_option('alx_stripe_test_sk', '');
-        if (empty($sk)) return new \WP_Error('alx_no_stripe_key', 'Stripe API key not set.', ['status' => 500]);
-        if (empty($cart['lines']) || !is_array($cart['lines'])) return new \WP_Error('alx_empty_cart', 'Cart is empty.', ['status' => 400]);
+        if (empty($sk)) {
+            return new \WP_Error('alx_no_stripe_key', 'Stripe API key not set.', ['status' => 500]);
+        }
+
+        if (empty($cart['lines']) || !is_array($cart['lines'])) {
+            return new \WP_Error('alx_empty_cart', 'Cart is empty.', ['status' => 400]);
+        }
 
         $success_url = apply_filters('aloxstore_checkout_success_url', home_url('/checkout/success'));
         $cancel_url  = apply_filters('aloxstore_checkout_cancel_url', home_url('/checkout/'));
@@ -62,15 +67,25 @@ class StripeGateway implements PaymentGatewayInterface {
             'quantity' => 1,
         ]];
 
-        $customer    = $cart['customer'] ?? [];
-        $email       = (string) ($customer['email'] ?? '');
-        $stripe_cust = (string) ($customer['stripe_customer_id'] ?? '');
+        // === Updated customer schema ===
+        $customer     = $cart['customer'] ?? [];
+        $billing      = $customer['billing'] ?? [];
+        $stripe_cust  = (string) ($customer['stripe_customer_id'] ?? '');
+        $email        = (string) ($billing['email'] ?? '');
+        $first_name   = (string) ($billing['first_name'] ?? '');
+        $last_name    = (string) ($billing['last_name'] ?? '');
+        $phone        = (string) ($billing['phone'] ?? '');
+        $billing_city = (string) ($billing['city'] ?? '');
+        $billing_country = (string) ($billing['country'] ?? '');
+        $billing_postcode = (string) ($billing['postcode'] ?? '');
+        $billing_address_1 = (string) ($billing['address_1'] ?? '');
+        $billing_address_2 = (string) ($billing['address_2'] ?? '');
 
         $meta = [
             'cart_id'       => sanitize_key($cart['id'] ?? ''),
-            'alox_email'    => $email,
-            'alox_currency' => strtoupper($cart['currency'] ?? 'EUR'),
-            'alox_total'    => $gross_cents,
+            'alx_email'     => $email,
+            'alx_currency'  => strtoupper($cart['currency'] ?? 'EUR'),
+            'alx_total'     => $gross_cents,
         ];
 
         $params = [
@@ -81,19 +96,42 @@ class StripeGateway implements PaymentGatewayInterface {
             'metadata'    => $meta,
         ];
 
+        // === Billing & customer info ===
         if ($stripe_cust) {
             $params['customer'] = $stripe_cust;
         } else {
-            $params['customer_email'] = $email ?: null;
+            if ($email) {
+                $params['customer_email'] = $email;
+            }
             $params['customer_creation'] = 'always';
         }
+
+        // === Optional billing details ===
+        $params['payment_intent_data'] = [
+            'receipt_email' => $email,
+            'description'   => sprintf('Order from %s %s', $first_name, $last_name),
+            'shipping' => [
+                'name'    => trim($first_name . ' ' . $last_name),
+                'phone'   => $phone ?: null,
+                'address' => [
+                    'line1'       => $billing_address_1,
+                    'line2'       => $billing_address_2 ?: null,
+                    'city'        => $billing_city,
+                    'postal_code' => $billing_postcode,
+                    'country'     => $billing_country ?: null,
+                ],
+            ],
+        ];
 
         $params = apply_filters('aloxstore_stripe_session_params', $params, $cart);
 
         try {
             \Stripe\Stripe::setApiKey($sk);
             $session = \Stripe\Checkout\Session::create($params);
-            return ['id' => $session->id, 'url' => $session->url];
+            return [
+                'id'  => $session->id,
+                'url' => $session->url,
+            ];
         } catch (\Exception $e) {
             return new \WP_Error('alx_stripe_error', $e->getMessage(), ['status' => 500]);
         }

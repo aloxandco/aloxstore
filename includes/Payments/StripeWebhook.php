@@ -61,10 +61,10 @@ class StripeWebhook {
             ]);
         }
 
-        // Normalize cart totals with our logic
+        // Normalize cart totals with pricing logic
         $cart = CartPricing::calculate($cart);
 
-        // Ensure order CPT exists
+        // Ensure CPT is registered
         if (!post_type_exists('alox_order')) {
             \AloxStore\CPT\Orders::register();
         }
@@ -84,35 +84,56 @@ class StripeWebhook {
             return $order_id;
         }
 
-        // === SAVE ORDER META ===
+        // === SAVE CORE META ===
         update_post_meta($order_id, '_alx_stripe_session_id', $session_id);
         update_post_meta($order_id, '_alx_cart', $cart);
-        update_post_meta($order_id, '_alx_customer_email', sanitize_email($email));
         update_post_meta($order_id, '_alx_subtotal', (int)($cart['subtotal_cents'] ?? 0));
         update_post_meta($order_id, '_alx_shipping', (int)($cart['shipping_cents'] ?? 0));
         update_post_meta($order_id, '_alx_tax', (int)($cart['tax_cents'] ?? 0));
         update_post_meta($order_id, '_alx_total', (int)($cart['total_cents'] ?? 0));
         update_post_meta($order_id, '_alx_paid', true);
 
-        // Customer details
+        // === SAVE CUSTOMER DETAILS ===
         if (!empty($cart['customer'])) {
-            foreach ($cart['customer'] as $key => $value) {
-                $sanitized = is_email($value)
-                    ? sanitize_email($value)
-                    : sanitize_text_field($value);
-                update_post_meta($order_id, '_alx_customer_' . $key, $sanitized);
+            $cust = $cart['customer'];
+
+            // Stripe Customer ID
+            if (!empty($cust['stripe_customer_id'])) {
+                update_post_meta($order_id, '_alx_stripe_customer_id', sanitize_text_field($cust['stripe_customer_id']));
+            }
+
+            // Billing info
+            if (!empty($cust['billing']) && is_array($cust['billing'])) {
+                foreach ($cust['billing'] as $key => $value) {
+                    $val = is_email($value) ? sanitize_email($value) : sanitize_text_field($value);
+                    update_post_meta($order_id, '_alx_billing_' . $key, $val);
+                }
+            }
+
+            // Shipping info
+            if (!empty($cust['shipping']) && is_array($cust['shipping'])) {
+                foreach ($cust['shipping'] as $key => $value) {
+                    $val = sanitize_text_field($value);
+                    update_post_meta($order_id, '_alx_shipping_' . $key, $val);
+                }
+            }
+
+            // Also keep a top-level reference to billing email
+            if (!empty($cust['billing']['email'])) {
+                update_post_meta($order_id, '_alx_billing_email', sanitize_email($cust['billing']['email']));
             }
         }
 
-        // Store raw Stripe metadata for reference
+        // === STRIPE META ===
         update_post_meta($order_id, '_alx_stripe_meta', (array)($session->metadata ?? []));
-
-        // ✅ Store Stripe-confirmed paid total (in cents)
         if (!empty($session->amount_total)) {
             update_post_meta($order_id, '_alx_stripe_amount_total', (int)$session->amount_total);
         }
+        if (!empty($session->currency)) {
+            update_post_meta($order_id, '_alx_stripe_currency', strtoupper($session->currency));
+        }
 
-        // Clean up cart cache
+        // Clean up transient cart
         delete_transient('alx_cart_' . sanitize_key($cart_id));
 
         return rest_ensure_response([

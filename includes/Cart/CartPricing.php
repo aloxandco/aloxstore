@@ -16,9 +16,23 @@ class CartPricing
         $gross_total  = 0;
         $totals_by_rate = [];
 
+        // Normalize input: accept either ['items'] or ['lines'] from saved cart
+        if (empty($cart['lines']) && !empty($cart['items']) && is_array($cart['items'])) {
+            // Convert legacy or raw cart structure
+            $cart['lines'] = [];
+            foreach ($cart['items'] as $item) {
+                $cart['lines'][] = [
+                    'product_id' => (int) ($item['product_id'] ?? 0),
+                    'qty'        => max(1, (int) ($item['qty'] ?? 1)),
+                ];
+            }
+        }
+
+// Ensure $cart['lines'] exists and is an array
         if (empty($cart['lines']) || !is_array($cart['lines'])) {
             $cart['lines'] = [];
         }
+
 
         // === LINE CALCULATION ===
         foreach ($cart['lines'] as &$line) {
@@ -75,9 +89,9 @@ class CartPricing
             $shipping_net = 0;
         }
 
-        // Default shipping VAT = highest rate, or 0 if VAT disabled
-        $shipping_vat_rate = ($vat_mode === 'enabled')
-            ? (float)max(Vat::get_available_rates(get_option('alx_vat_country', 'FR')))
+        $rates = Vat::get_available_rates(get_option('alx_vat_country', 'FR'));
+        $shipping_vat_rate = ($vat_mode === 'enabled' && !empty($rates))
+            ? (float)max($rates)
             : 0.0;
 
         $shipping_calc = Vat::compute_line($shipping_net, $shipping_vat_rate, $include_tax);

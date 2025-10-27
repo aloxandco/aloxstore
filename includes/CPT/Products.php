@@ -33,7 +33,7 @@ class Products {
         ]);
     }
 }
-add_action( 'init', [ __NAMESPACE__ . '\\Products', 'register' ] );
+//add_action( 'init', [ __NAMESPACE__ . '\\Products', 'register' ] );
 
 /**
  * === META REGISTRATION (single source of truth) ===

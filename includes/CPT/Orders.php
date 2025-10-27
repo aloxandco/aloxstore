@@ -35,7 +35,6 @@ class Orders {
 
     public static function render_meta_box($post) {
         $session_id = get_post_meta($post->ID, '_alx_stripe_session_id', true);
-        $email      = get_post_meta($post->ID, '_alx_customer_email', true);
         $paid       = get_post_meta($post->ID, '_alx_paid', true) ? '✔️ Yes' : '❌ No';
 
         $subtotal   = (int) get_post_meta($post->ID, '_alx_subtotal', true);
@@ -47,21 +46,35 @@ class Orders {
         $incl_vat   = (bool) get_option('alx_prices_include_tax', false);
         $vat_mode   = get_option('alx_vat_mode', 'enabled');
 
-        $fields = [
-            'first_name', 'last_name', 'company', 'address_1', 'address_2',
-            'postcode', 'city', 'country', 'telephone',
+        // === BILLING INFORMATION ===
+        echo '<h4>Billing Information</h4><table class="widefat striped"><tbody>';
+        $billing_fields = [
+            'first_name', 'last_name', 'email', 'company',
+            'address_1', 'address_2', 'postcode', 'city', 'country', 'phone'
         ];
-
-        echo '<h4>Customer</h4><table class="widefat striped"><tbody>';
-        echo '<tr><td><strong>Email:</strong></td><td>' . esc_html($email) . '</td></tr>';
-        foreach ($fields as $key) {
-            $val = get_post_meta($post->ID, '_alx_customer_' . $key, true);
+        foreach ($billing_fields as $key) {
+            $val = get_post_meta($post->ID, '_alx_billing_' . $key, true);
             if ($val !== '') {
-                echo '<tr><td><strong>' . ucfirst(str_replace('_', ' ', $key)) . ':</strong></td><td>' . esc_html($val) . '</td></tr>';
+                echo '<tr><td><strong>' . esc_html(ucfirst(str_replace('_', ' ', $key))) . ':</strong></td><td>' . esc_html($val) . '</td></tr>';
             }
         }
         echo '</tbody></table>';
 
+        // === SHIPPING INFORMATION ===
+        echo '<h4>Shipping Information</h4><table class="widefat striped"><tbody>';
+        $shipping_fields = [
+            'first_name', 'last_name', 'company',
+            'address_1', 'address_2', 'postcode', 'city', 'country', 'phone'
+        ];
+        foreach ($shipping_fields as $key) {
+            $val = get_post_meta($post->ID, '_alx_shipping_' . $key, true);
+            if ($val !== '') {
+                echo '<tr><td><strong>' . esc_html(ucfirst(str_replace('_', ' ', $key))) . ':</strong></td><td>' . esc_html($val) . '</td></tr>';
+            }
+        }
+        echo '</tbody></table>';
+
+        // === CART SUMMARY ===
         echo '<h4>Cart Summary</h4>';
         if (is_array($cart) && !empty($cart['lines'])) {
             $vat_suffix = $vat_mode === 'none' ? '' : ($incl_vat ? '(incl.)' : '(excl.)');
@@ -89,7 +102,6 @@ class Orders {
             echo '<li><strong>Subtotal:</strong> ' . esc_html(Helpers::format_money($subtotal)) . '</li>';
             echo '<li><strong>Shipping:</strong> ' . esc_html(Helpers::format_money($shipping)) . '</li>';
 
-            // VAT Breakdown (hidden if disabled)
             if ($vat_mode !== 'none' && !empty($cart['tax_breakdown'])) {
                 foreach ($cart['tax_breakdown'] as $item) {
                     echo '<li><strong>VAT (' . number_format($item['rate'], 2) . '%):</strong> '
@@ -104,12 +116,12 @@ class Orders {
             echo '<p>No cart items found.</p>';
         }
 
+        // === STRIPE SECTION ===
         echo '<h4>Stripe</h4>';
         echo '<table class="widefat striped"><tbody>';
         echo '<tr><td><strong>Session ID:</strong></td><td>' . esc_html($session_id) . '</td></tr>';
         echo '<tr><td><strong>Paid:</strong></td><td>' . esc_html($paid) . '</td></tr>';
 
-        // Stripe actual paid amount (keeps Stripe’s own currency)
         $stripe_paid_cents = (int) get_post_meta($post->ID, '_alx_stripe_amount_total', true);
         $stripe_currency   = strtoupper(get_post_meta($post->ID, '_alx_stripe_currency', true) ?: $currency);
 
@@ -139,14 +151,14 @@ add_filter('manage_edit-alox_order_columns', function ($columns) {
 add_action('manage_alox_order_posts_custom_column', function ($column, $post_id) {
     switch ($column) {
         case 'customer':
-            $first = get_post_meta($post_id, '_alx_customer_first_name', true);
-            $last  = get_post_meta($post_id, '_alx_customer_last_name', true);
+            $first = get_post_meta($post_id, '_alx_billing_first_name', true);
+            $last  = get_post_meta($post_id, '_alx_billing_last_name', true);
             echo esc_html(trim("$first $last"));
             break;
 
         case 'location':
-            $city    = get_post_meta($post_id, '_alx_customer_city', true);
-            $country = get_post_meta($post_id, '_alx_customer_country', true);
+            $city    = get_post_meta($post_id, '_alx_billing_city', true);
+            $country = get_post_meta($post_id, '_alx_billing_country', true);
             echo esc_html(trim("$city, $country"));
             break;
 

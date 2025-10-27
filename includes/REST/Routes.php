@@ -74,9 +74,20 @@ class Routes {
     }
 
     /** Public routes but CSRF-protected via REST nonce */
-    public static function perm_public_nonce( WP_REST_Request $request ): bool {
-        $nonce = $request->get_header( 'X-WP-Nonce' );
-        return (bool) wp_verify_nonce( $nonce, 'wp_rest' );
+    public static function perm_public_nonce( \WP_REST_Request $request ): bool {
+        // 1. Allow admin / authenticated users with a valid WP REST nonce
+        $nonce = $request->get_header('X-WP-Nonce');
+        if ( wp_verify_nonce( $nonce, 'wp_rest' ) ) {
+            return true;
+        }
+
+        // 2. Allow guests with a valid cart session token cookie
+        if ( isset( $_COOKIE['alx_cart'] ) && preg_match( '/^[a-f0-9\-]{32,}$/i', $_COOKIE['alx_cart'] ) ) {
+            return true;
+        }
+
+        // 3. Deny anything else
+        return false;
     }
 
     /** GET /cart */
@@ -158,57 +169,30 @@ class Routes {
      * touching the canonical numeric keys.
      */
     public static function enrich_cart( array $cart ): array {
-     // Return canonical cart (Cart::save_cart ensures pricing & totals are present).
-        $lines           = [];
-        $defaultCurrency = strtoupper( apply_filters( 'aloxstore_default_currency', 'EUR' ) );
-        $subtotal_cents  = 0;
+        // Always re-sync the canonical cart data from pricing engine
+        $cart = \AloxStore\Cart\CartPricing::calculate( $cart );
 
-        foreach ( $cart['items'] as $row ) {
-            $pid = (int) ( $row['product_id'] ?? 0 );
-            $qty = max( 1, (int) ( $row['qty'] ?? 1 ) );
-            if ( ! $pid ) continue;
-
-            if ( get_post_type( $pid ) !== 'alox_product' || 'publish' !== get_post_status( $pid ) ) {
+        // Add presentation-only details (no numeric recalculation)
+        $lines = [];
+        foreach ( $cart['lines'] ?? [] as $line ) {
+            $pid = (int) ( $line['product_id'] ?? 0 );
+            if ( ! $pid || get_post_type( $pid ) !== 'alox_product' ) {
                 continue;
             }
 
-            $title     = get_the_title( $pid );
-            $unit      = (int) get_post_meta( $pid, 'price_cents', true );
-            $item_cur  = get_post_meta( $pid, 'currency', true );
-            $cur       = $item_cur ? strtoupper( $item_cur ) : $defaultCurrency;
+            $thumb_url = get_the_post_thumbnail_url( $pid, 'thumbnail' ) ?: '';
+            $permalink = get_permalink( $pid );
 
-            $line_total = max( 0, $unit ) * $qty;
-
-            $lines[] = [
-                'product_id' => $pid,
-                'title'      => (string) $title,
-                'qty'        => $qty,
-                'unit_cents' => max( 0, (int) $unit ),
-                'currency'   => $cur,
-                'line_cents' => max( 0, (int) $line_total ),
-            ];
-
-            $subtotal_cents += max( 0, (int) $line_total );
+            $lines[] = array_merge( $line, [
+                'title'     => get_the_title( $pid ),
+                'thumbnail' => $thumb_url,
+                'permalink' => $permalink,
+                // Keep backward-compatibility aliases
+                'line_cents' => $line['line_gross_cents'] ?? 0,
+            ]);
         }
 
-        $shipping = (int)get_option('alx_flat_rate_cents', 0);
-        $free_min = (int)get_option('alx_free_shipping_min_cents', 0);
-        if ($free_min > 0 && $subtotal_cents >= $free_min) {
-            $shipping = 0;
-        }
-        $tax = 0;
-        if (get_option('alx_prices_include_tax', true)) {
-            $tax = 0;
-        }
-
-        $cart['lines']          = $lines;
-        $cart['currency']       = self::pick_cart_currency( $lines, $defaultCurrency );
-        $cart['subtotal_cents'] = $subtotal_cents;
-        $cart['discount_cents'] = 0;
-        $cart['shipping_cents'] = $shipping;
-        $cart['tax_cents']      = $tax;
-        $cart['total_cents']    = $subtotal_cents + $shipping + $tax;
-
+        $cart['lines'] = $lines;
         return $cart;
     }
 
@@ -221,42 +205,61 @@ class Routes {
         return ( $product_id > 0 && get_post_type( $product_id ) === 'alox_product' && get_post_status( $product_id ) === 'publish' );
     }
 
-    /** Add the handler method for checkout/customer*/
+    /** Handle checkout/customer — create or update customer + save billing & shipping info */
     public static function checkout_customer( \WP_REST_Request $request ) {
         $body = $request->get_json_params();
 
-        $first_name = sanitize_text_field( $body['first_name'] ?? '' );
-        $last_name  = sanitize_text_field( $body['last_name'] ?? '' );
-        $email      = sanitize_email( $body['email'] ?? '' );
-        $company    = sanitize_text_field( $body['company'] ?? '' );
-        $address_1  = sanitize_text_field( $body['address_1'] ?? '' );
-        $address_2  = sanitize_text_field( $body['address_2'] ?? '' );
-        $postcode   = sanitize_text_field( $body['postcode'] ?? '' );
-        $city       = sanitize_text_field( $body['city'] ?? '' );
-        $country    = strtoupper( sanitize_text_field( $body['country'] ?? '' ) );
-        $telephone  = sanitize_text_field( $body['telephone'] ?? '' );
+        // === BILLING DATA ===
+        $billing_first_name = sanitize_text_field( $body['billing_first_name'] ?? '' );
+        $billing_last_name  = sanitize_text_field( $body['billing_last_name'] ?? '' );
+        $billing_email      = sanitize_email( $body['billing_email'] ?? '' );
+        $billing_company    = sanitize_text_field( $body['billing_company'] ?? '' );
+        $billing_address_1  = sanitize_text_field( $body['billing_address_1'] ?? '' );
+        $billing_address_2  = sanitize_text_field( $body['billing_address_2'] ?? '' );
+        $billing_postcode   = sanitize_text_field( $body['billing_postcode'] ?? '' );
+        $billing_city       = sanitize_text_field( $body['billing_city'] ?? '' );
+        $billing_country    = strtoupper( sanitize_text_field( $body['billing_country'] ?? '' ) );
+        $billing_phone      = sanitize_text_field( $body['billing_phone'] ?? '' );
 
-        // Required fields
-        $required = compact( 'first_name','last_name','email','address_1','postcode','city','country','telephone' );
+        // === SHIPPING DATA (optional — may default to billing) ===
+        $shipping_first_name = sanitize_text_field( $body['shipping_first_name'] ?? $billing_first_name );
+        $shipping_last_name  = sanitize_text_field( $body['shipping_last_name'] ?? $billing_last_name );
+        $shipping_company    = sanitize_text_field( $body['shipping_company'] ?? $billing_company );
+        $shipping_address_1  = sanitize_text_field( $body['shipping_address_1'] ?? $billing_address_1 );
+        $shipping_address_2  = sanitize_text_field( $body['shipping_address_2'] ?? $billing_address_2 );
+        $shipping_postcode   = sanitize_text_field( $body['shipping_postcode'] ?? $billing_postcode );
+        $shipping_city       = sanitize_text_field( $body['shipping_city'] ?? $billing_city );
+        $shipping_country    = strtoupper( sanitize_text_field( $body['shipping_country'] ?? $billing_country ) );
+        $shipping_phone      = sanitize_text_field( $body['shipping_phone'] ?? $billing_phone );
+
+        // === Required billing fields ===
+        $required = compact(
+            'billing_first_name', 'billing_last_name', 'billing_email',
+            'billing_address_1', 'billing_postcode', 'billing_city', 'billing_country', 'billing_phone'
+        );
         foreach ( $required as $k => $v ) {
             if ( empty( $v ) ) {
-                return new \WP_Error( 'alx_missing_fields', __( 'Please complete all required fields.', 'aloxstore' ), [ 'status' => 400, 'field' => $k ] );
+                return new \WP_Error(
+                    'alx_missing_fields',
+                    __( 'Please complete all required billing fields.', 'aloxstore' ),
+                    [ 'status' => 400, 'field' => $k ]
+                );
             }
         }
 
-        // Resolve/create WP user
+        // === Resolve or create WP user ===
         $user_id = get_current_user_id();
         if ( ! $user_id ) {
-            $existing = get_user_by( 'email', $email );
+            $existing = get_user_by( 'email', $billing_email );
             if ( $existing ) {
                 $user_id = $existing->ID;
             } else {
-                $username = sanitize_user( current( explode( '@', $email ) ), true );
+                $username = sanitize_user( current( explode( '@', $billing_email ) ), true );
                 if ( username_exists( $username ) ) {
                     $username .= '_' . wp_generate_password( 6, false, false );
                 }
                 $password = wp_generate_password( 20, true, false );
-                $user_id  = wp_create_user( $username, $password, $email );
+                $user_id  = wp_create_user( $username, $password, $billing_email );
                 if ( is_wp_error( $user_id ) ) {
                     return new \WP_Error( 'alx_user_create_failed', __( 'Could not create account.', 'aloxstore' ), [ 'status' => 500 ] );
                 }
@@ -265,97 +268,122 @@ class Routes {
             }
         }
 
-        // Save profile + billing meta
-        update_user_meta( $user_id, 'first_name', $first_name );
-        update_user_meta( $user_id, 'last_name',  $last_name );
-        $user = get_userdata( $user_id );
-        if ( $user && strtolower( $user->user_email ) !== strtolower( $email ) ) {
-            wp_update_user( [ 'ID' => $user_id, 'user_email' => $email ] );
-        }
+        // === Update user profile & billing/shipping meta ===
+        update_user_meta( $user_id, 'alx_user_billing_first_name', $billing_first_name );
+        update_user_meta( $user_id, 'alx_user_billing_last_name',  $billing_last_name );
+        update_user_meta( $user_id, 'alx_user_billing_email',      $billing_email );
+        update_user_meta( $user_id, 'alx_user_billing_company',    $billing_company );
+        update_user_meta( $user_id, 'alx_user_billing_address_1',  $billing_address_1 );
+        update_user_meta( $user_id, 'alx_user_billing_address_2',  $billing_address_2 );
+        update_user_meta( $user_id, 'alx_user_billing_postcode',   $billing_postcode );
+        update_user_meta( $user_id, 'alx_user_billing_city',       $billing_city );
+        update_user_meta( $user_id, 'alx_user_billing_country',    $billing_country );
+        update_user_meta( $user_id, 'alx_user_billing_phone',      $billing_phone );
 
-        update_user_meta( $user_id, 'alx_billing_company',   $company );
-        update_user_meta( $user_id, 'alx_billing_address_1', $address_1 );
-        update_user_meta( $user_id, 'alx_billing_address_2', $address_2 );
-        update_user_meta( $user_id, 'alx_billing_postcode',  $postcode );
-        update_user_meta( $user_id, 'alx_billing_city',      $city );
-        update_user_meta( $user_id, 'alx_billing_country',   $country );
-        update_user_meta( $user_id, 'alx_billing_phone',     $telephone );
+        update_user_meta( $user_id, 'alx_user_shipping_first_name', $shipping_first_name );
+        update_user_meta( $user_id, 'alx_user_shipping_last_name',  $shipping_last_name );
+        update_user_meta( $user_id, 'alx_user_shipping_company',    $shipping_company );
+        update_user_meta( $user_id, 'alx_user_shipping_address_1',  $shipping_address_1 );
+        update_user_meta( $user_id, 'alx_user_shipping_address_2',  $shipping_address_2 );
+        update_user_meta( $user_id, 'alx_user_shipping_postcode',   $shipping_postcode );
+        update_user_meta( $user_id, 'alx_user_shipping_city',       $shipping_city );
+        update_user_meta( $user_id, 'alx_user_shipping_country',    $shipping_country );
+        update_user_meta( $user_id, 'alx_user_shipping_phone',      $shipping_phone );
 
-        // --- Create/Update Stripe Customer so Checkout is prefilled ---
-        // Load Stripe lib if needed
+        // === Stripe Customer sync ===
         if ( ! class_exists( '\Stripe\Stripe' ) ) {
             $stripe_init = ALOXSTORE_PATH . 'lib/stripe-php/init.php';
             if ( file_exists( $stripe_init ) ) {
                 require_once $stripe_init;
             }
         }
+
         $mode = get_option( 'alx_mode', 'test' );
         $sk   = ( $mode === 'live' ) ? get_option( 'alx_stripe_live_sk', '' ) : get_option( 'alx_stripe_test_sk', '' );
+
         if ( $sk ) {
             try {
                 \Stripe\Stripe::setApiKey( $sk );
 
-                $address = [
-                    'line1'       => $address_1,
-                    'line2'       => $address_2 ?: null,
-                    'postal_code' => $postcode,
-                    'city'        => $city,
-                    'country'     => $country ?: null,
+                $billing_address = [
+                    'line1'       => $billing_address_1,
+                    'line2'       => $billing_address_2 ?: null,
+                    'postal_code' => $billing_postcode,
+                    'city'        => $billing_city,
+                    'country'     => $billing_country ?: null,
+                ];
+
+                $shipping_address = [
+                    'line1'       => $shipping_address_1,
+                    'line2'       => $shipping_address_2 ?: null,
+                    'postal_code' => $shipping_postcode,
+                    'city'        => $shipping_city,
+                    'country'     => $shipping_country ?: null,
                 ];
 
                 $shipping = [
-                    'name'    => trim( $first_name . ' ' . $last_name ),
-                    'phone'   => $telephone ?: null,
-                    'address' => $address,
+                    'name'    => trim( $shipping_first_name . ' ' . $shipping_last_name ),
+                    'phone'   => $shipping_phone ?: null,
+                    'address' => $shipping_address,
                 ];
 
-                $cust_id = (string) get_user_meta( $user_id, 'alx_stripe_customer_id', true );
+                $cust_id = (string) get_user_meta( $user_id, 'alx_user_stripe_customer_id', true );
 
                 if ( $cust_id ) {
-                    // Update existing customer
                     \Stripe\Customer::update( $cust_id, array_filter( [
-                        'email'    => $email,
-                        'name'     => trim( $first_name . ' ' . $last_name ),
-                        'phone'    => $telephone ?: null,
-                        'address'  => $address,
+                        'email'    => $billing_email,
+                        'name'     => trim( $billing_first_name . ' ' . $billing_last_name ),
+                        'phone'    => $billing_phone ?: null,
+                        'address'  => $billing_address,
                         'shipping' => $shipping,
                     ] ) );
                 } else {
-                    // Create new customer
                     $created = \Stripe\Customer::create( array_filter( [
-                        'email'    => $email,
-                        'name'     => trim( $first_name . ' ' . $last_name ),
-                        'phone'    => $telephone ?: null,
-                        'address'  => $address,
+                        'email'    => $billing_email,
+                        'name'     => trim( $billing_first_name . ' ' . $billing_last_name ),
+                        'phone'    => $billing_phone ?: null,
+                        'address'  => $billing_address,
                         'shipping' => $shipping,
                     ] ) );
                     if ( ! empty( $created->id ) ) {
                         $cust_id = $created->id;
-                        update_user_meta( $user_id, 'alx_stripe_customer_id', $cust_id );
+                        update_user_meta( $user_id, 'alx_user_stripe_customer_id', $cust_id );
                     }
                 }
 
-                // Persist on cart
+                // === Persist on cart ===
                 $cart = \AloxStore\Cart\Cart::get_cart();
                 $cart['customer'] = [
-                    'user_id'            => (int) $user_id,
-                    'stripe_customer_id' => $cust_id ?: '',
-                    'first_name'         => $first_name,
-                    'last_name'          => $last_name,
-                    'email'              => $email,
-                    'company'            => $company,
-                    'address_1'          => $address_1,
-                    'address_2'          => $address_2,
-                    'postcode'           => $postcode,
-                    'city'               => $city,
-                    'country'            => $country,
-                    'telephone'          => $telephone,
+                    'user_id'               => (int) $user_id,
+                    'stripe_customer_id'    => $cust_id ?: '',
+                    'billing' => [
+                        'first_name' => $billing_first_name,
+                        'last_name'  => $billing_last_name,
+                        'email'      => $billing_email,
+                        'company'    => $billing_company,
+                        'address_1'  => $billing_address_1,
+                        'address_2'  => $billing_address_2,
+                        'postcode'   => $billing_postcode,
+                        'city'       => $billing_city,
+                        'country'    => $billing_country,
+                        'phone'      => $billing_phone,
+                    ],
+                    'shipping' => [
+                        'first_name' => $shipping_first_name,
+                        'last_name'  => $shipping_last_name,
+                        'company'    => $shipping_company,
+                        'address_1'  => $shipping_address_1,
+                        'address_2'  => $shipping_address_2,
+                        'postcode'   => $shipping_postcode,
+                        'city'       => $shipping_city,
+                        'country'    => $shipping_country,
+                        'phone'      => $shipping_phone,
+                    ],
                 ];
                 \AloxStore\Cart\Cart::save_cart( $cart );
 
             } catch ( \Exception $e ) {
-                // Don’t hard-fail checkout on customer creation issues; just continue without Stripe customer
-                // You can log this if needed:
+                // Gracefully ignore Stripe customer sync issues
                 // error_log( 'Stripe customer error: ' . $e->getMessage() );
             }
         }

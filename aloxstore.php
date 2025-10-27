@@ -6,6 +6,8 @@ Description: Lightweight, Woo-free shop for WordPress. Physical/services only (v
 Version: 0.1.1
 Author: Alox & Co
 Author URI: https://alox.co
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: aloxstore
 */
 
@@ -23,6 +25,7 @@ add_action( 'plugins_loaded', function() {
 // --- Require Core files (order matters: Helpers first) ---
 require_once ALOXSTORE_PATH . 'includes/Core/Helpers.php';
 require_once ALOXSTORE_PATH . 'includes/Admin/Settings.php';
+require_once ALOXSTORE_PATH . 'includes/Admin/UserProfile.php';
 require_once ALOXSTORE_PATH . 'includes/CPT/Products.php';
 require_once ALOXSTORE_PATH . 'includes/CPT/Orders.php';
 require_once ALOXSTORE_PATH . 'includes/CPT/Coupons.php';

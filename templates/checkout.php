@@ -48,6 +48,36 @@ $vat_label = ($vat_mode !== 'none')
     : '';
 
 $defaults = isset($vars['defaults']) ? (array)$vars['defaults'] : [];
+// 🧍 Prefill logged-in user's saved AloxStore data
+if (is_user_logged_in()) {
+    $user_id = get_current_user_id();
+
+    $meta_keys = [
+        // Billing fields
+        'billing_first_name', 'billing_last_name', 'billing_email',
+        'billing_company', 'billing_address_1', 'billing_address_2',
+        'billing_postcode', 'billing_city', 'billing_country', 'billing_phone',
+
+        // Shipping fields
+        'shipping_first_name', 'shipping_last_name', 'shipping_company',
+        'shipping_address_1', 'shipping_address_2', 'shipping_postcode',
+        'shipping_city', 'shipping_country', 'shipping_phone',
+    ];
+
+    foreach ($meta_keys as $key) {
+        $meta_value = get_user_meta($user_id, 'alx_user_' . $key, true);
+        if (!empty($meta_value)) {
+            $defaults[$key] = $meta_value;
+        }
+    }
+
+    // Fallback email if missing
+    if (empty($defaults['billing_email'])) {
+        $user = wp_get_current_user();
+        $defaults['billing_email'] = $user->user_email;
+    }
+}
+
 $c = function ($k) use ($defaults) {
     return isset($defaults[$k]) ? esc_attr($defaults[$k]) : '';
 };
@@ -72,67 +102,76 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
 <div class="container m-0 p-0 mb-5 alx-checkout-container">
     <form class="alx-checkout-form needs-validation" novalidate>
         <div class="row g-4">
-            <!-- Left Column: Billing Form -->
+            <!-- Left Column: Billing & Shipping Form -->
             <div class="col-lg-7">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
-                        <h6 class="fw-semibold mb-3 text-primary"><?php esc_html_e('Contact Details', 'aloxstore'); ?></h6>
+                        <!-- Contact / Billing Info -->
+                        <h6 class="fw-semibold mb-3 text-primary"><?php esc_html_e('Billing Details', 'aloxstore'); ?></h6>
 
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label"><?php esc_html_e('First name*', 'aloxstore'); ?></label>
-                                <input type="text" name="first_name" class="form-control" placeholder="John" value="<?php echo $c('first_name'); ?>" required>
+                                <input type="text" name="billing_first_name" class="form-control" placeholder="John"
+                                       value="<?php echo $c('billing_first_name'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Please enter your first name.', 'aloxstore'); ?></div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label"><?php esc_html_e('Last name*', 'aloxstore'); ?></label>
-                                <input type="text" name="last_name" class="form-control" placeholder="Doe" value="<?php echo $c('last_name'); ?>" required>
+                                <input type="text" name="billing_last_name" class="form-control" placeholder="Doe"
+                                       value="<?php echo $c('billing_last_name'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Please enter your last name.', 'aloxstore'); ?></div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label"><?php esc_html_e('Email*', 'aloxstore'); ?></label>
-                                <input type="email" name="email" class="form-control" placeholder="john@example.com" value="<?php echo $c('email'); ?>" required>
+                                <input type="email" name="billing_email" class="form-control" placeholder="john@example.com"
+                                       value="<?php echo $c('billing_email'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Please enter a valid email address.', 'aloxstore'); ?></div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label"><?php esc_html_e('Telephone*', 'aloxstore'); ?></label>
-                                <input type="tel" name="telephone" class="form-control" placeholder="+31 6 1234 5678" value="<?php echo $c('telephone'); ?>" required>
+                                <input type="tel" name="billing_phone" class="form-control" placeholder="+31 6 1234 5678"
+                                       value="<?php echo $c('billing_phone'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Please enter your telephone number.', 'aloxstore'); ?></div>
                             </div>
                         </div>
 
-                        <h6 class="fw-semibold mt-4 mb-3 text-primary"><?php esc_html_e('Company Details', 'aloxstore'); ?></h6>
+                        <h6 class="fw-semibold mt-4 mb-3 text-primary"><?php esc_html_e('Company (optional)', 'aloxstore'); ?></h6>
                         <div class="mb-3">
-                            <label class="form-label"><?php esc_html_e('Company (optional)', 'aloxstore'); ?></label>
-                            <input type="text" name="company" class="form-control" placeholder="Your company name" value="<?php echo $c('company'); ?>">
+                            <input type="text" name="billing_company" class="form-control" placeholder="Your company name"
+                                   value="<?php echo $c('billing_company'); ?>">
                         </div>
 
                         <h6 class="fw-semibold mt-4 mb-3 text-primary"><?php esc_html_e('Billing Address', 'aloxstore'); ?></h6>
                         <div class="row g-3">
                             <div class="col-12">
                                 <label class="form-label"><?php esc_html_e('Address line 1*', 'aloxstore'); ?></label>
-                                <input type="text" name="address_1" class="form-control" placeholder="Street and house number" value="<?php echo $c('address_1'); ?>" required>
+                                <input type="text" name="billing_address_1" class="form-control" placeholder="Street and house number"
+                                       value="<?php echo $c('billing_address_1'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Please enter your address.', 'aloxstore'); ?></div>
                             </div>
                             <div class="col-12">
                                 <label class="form-label"><?php esc_html_e('Address line 2', 'aloxstore'); ?></label>
-                                <input type="text" name="address_2" class="form-control" placeholder="Apartment, suite, etc." value="<?php echo $c('address_2'); ?>">
+                                <input type="text" name="billing_address_2" class="form-control" placeholder="Apartment, suite, etc."
+                                       value="<?php echo $c('billing_address_2'); ?>">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label"><?php esc_html_e('Postcode*', 'aloxstore'); ?></label>
-                                <input type="text" name="postcode" class="form-control" placeholder="1234 AB" value="<?php echo $c('postcode'); ?>" required>
+                                <input type="text" name="billing_postcode" class="form-control" placeholder="1234 AB"
+                                       value="<?php echo $c('billing_postcode'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Enter a valid postcode.', 'aloxstore'); ?></div>
                             </div>
                             <div class="col-md-8">
                                 <label class="form-label"><?php esc_html_e('City*', 'aloxstore'); ?></label>
-                                <input type="text" name="city" class="form-control" placeholder="Amsterdam" value="<?php echo $c('city'); ?>" required>
+                                <input type="text" name="billing_city" class="form-control" placeholder="Amsterdam"
+                                       value="<?php echo $c('billing_city'); ?>" required>
                                 <div class="invalid-feedback"><?php esc_html_e('Please enter your city.', 'aloxstore'); ?></div>
                             </div>
                             <div class="col-12">
                                 <label class="form-label"><?php esc_html_e('Country*', 'aloxstore'); ?></label>
-                                <select name="country" class="form-select" required>
+                                <select name="billing_country" class="form-select" required>
                                     <?php foreach ($countries as $code => $label) :
-                                        $selected = (strtoupper($defaults['country'] ?? '') === $code) ? 'selected' : '';
+                                        $selected = (strtoupper($defaults['billing_country'] ?? '') === $code) ? 'selected' : '';
                                         ?>
                                         <option value="<?php echo esc_attr($code); ?>" <?php echo $selected; ?>>
                                             <?php echo esc_html($label); ?>
@@ -142,9 +181,88 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
                                 <div class="invalid-feedback"><?php esc_html_e('Please select your country.', 'aloxstore'); ?></div>
                             </div>
                         </div>
+
+                        <!-- Shipping Section Toggle -->
+                        <div class="form-check form-switch mt-5 mb-3">
+                            <input class="form-check-input" type="checkbox" id="differentShipping">
+                            <label class="form-check-label fw-semibold" for="differentShipping">
+                                <?php esc_html_e('Ship to a different address?', 'aloxstore'); ?>
+                            </label>
+                        </div>
+
+                        <!-- Shipping Address (Hidden by default) -->
+                        <div id="shippingAddressFields" style="display:none;">
+                            <h6 class="fw-semibold mt-3 mb-3 text-primary"><?php esc_html_e('Shipping Address', 'aloxstore'); ?></h6>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label"><?php esc_html_e('First name*', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_first_name" class="form-control"
+                                           value="<?php echo $c('shipping_first_name'); ?>" placeholder="John">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label"><?php esc_html_e('Last name*', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_last_name" class="form-control"
+                                           value="<?php echo $c('shipping_last_name'); ?>" placeholder="Doe">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label"><?php esc_html_e('Company (optional)', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_company" class="form-control"
+                                           value="<?php echo $c('shipping_company'); ?>" placeholder="Your company name">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label"><?php esc_html_e('Address line 1*', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_address_1" class="form-control"
+                                           value="<?php echo $c('shipping_address_1'); ?>" placeholder="Street and house number">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label"><?php esc_html_e('Address line 2', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_address_2" class="form-control"
+                                           value="<?php echo $c('shipping_address_2'); ?>" placeholder="Apartment, suite, etc.">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label"><?php esc_html_e('Postcode*', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_postcode" class="form-control"
+                                           value="<?php echo $c('shipping_postcode'); ?>" placeholder="1234 AB">
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label"><?php esc_html_e('City*', 'aloxstore'); ?></label>
+                                    <input type="text" name="shipping_city" class="form-control"
+                                           value="<?php echo $c('shipping_city'); ?>" placeholder="Amsterdam">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label"><?php esc_html_e('Country*', 'aloxstore'); ?></label>
+                                    <select name="shipping_country" class="form-select">
+                                        <?php foreach ($countries as $code => $label) :
+                                            $selected = (strtoupper($defaults['shipping_country'] ?? '') === $code) ? 'selected' : '';
+                                            ?>
+                                            <option value="<?php echo esc_attr($code); ?>" <?php echo $selected; ?>>
+                                                <?php echo esc_html($label); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label"><?php esc_html_e('Telephone', 'aloxstore'); ?></label>
+                                    <input type="tel" name="shipping_phone" class="form-control"
+                                           value="<?php echo $c('shipping_phone'); ?>" placeholder="+31 6 1234 5678">
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            <script>
+                document.addEventListener('DOMContentLoaded', () => {
+                    const toggle = document.getElementById('differentShipping');
+                const shippingSection = document.getElementById('shippingAddressFields');
+                if (!toggle || !shippingSection) return;
+                toggle.addEventListener('change', () => {
+                    shippingSection.style.display = toggle.checked ? 'block' : 'none';
+                });
+                });
+            </script>
+
 
             <!-- Right Column: Order Summary -->
             <div class="col-lg-5">
@@ -239,31 +357,3 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
         cursor: not-allowed;
     }
 </style>
-
-<script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const form = document.querySelector('.alx-checkout-form');
-    const btn = document.querySelector('.alx-checkout-submit');
-    if (!form || !btn) return;
-
-    // Validation
-    form.addEventListener('submit', (e) => {
-        if (!form.checkValidity()) {
-        e.preventDefault();
-        e.stopPropagation();
-        form.classList.add('was-validated');
-        return false;
-    }
-    }, false);
-
-    // Spinner on submit
-    btn.addEventListener('click', (e) => {
-        if (btn.disabled) return;
-    btn.disabled = true;
-    btn.innerHTML = `
-            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-            <?php echo esc_html__('Processing...', 'aloxstore'); ?>
-        `;
-    });
-    });
-</script>
