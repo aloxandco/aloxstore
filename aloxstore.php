@@ -26,7 +26,7 @@ add_action( 'plugins_loaded', function() {
 require_once ALOXSTORE_PATH . 'includes/Core/Helpers.php';
 require_once ALOXSTORE_PATH . 'includes/Admin/Settings.php';
 require_once ALOXSTORE_PATH . 'includes/Admin/UserProfile.php';
-require_once ALOXSTORE_PATH . 'includes/CPT/Products.php';
+require_once ALOXSTORE_PATH . 'includes/CPT/Products/Index.php';
 require_once ALOXSTORE_PATH . 'includes/CPT/Orders.php';
 require_once ALOXSTORE_PATH . 'includes/CPT/Coupons.php';
 require_once ALOXSTORE_PATH . 'includes/Cart/Cart.php';
@@ -44,7 +44,6 @@ require_once ALOXSTORE_PATH . 'includes/Shortcodes/Checkout.php';
 
 // --- Bootstrap (single source of truth) ---
 add_action( 'init', function() {
-    \AloxStore\CPT\Products::register();
     \AloxStore\CPT\Orders::register();
     \AloxStore\CPT\Coupons::register();
     \AloxStore\Shortcodes\Grid::register();

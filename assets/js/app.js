@@ -82,9 +82,9 @@
         if (!btn) return;
 
         e.preventDefault();
-        var row = btn.closest('tr[data-product]');
-        var pid = row ? parseInt(row.getAttribute('data-product'), 10) : 0;
-        var input = row ? row.querySelector('.alx-qty') : null;
+        var container = btn.closest('tr[data-product], .card[data-product]');
+        var pid = container ? parseInt(container.getAttribute('data-product'), 10) : 0;
+        var input = container ? container.querySelector('.alx-qty') : null;
         var qty = input ? parseInt(input.value, 10) : 1;
         qty = (isNaN(qty) || qty < 0) ? 0 : qty;
 
@@ -97,14 +97,14 @@
         }
     });
 
-    // CART: remove line
+// CART: remove line
     document.addEventListener('click', async function (e) {
         var btn = e.target.closest('.alx-remove');
         if (!btn) return;
 
         e.preventDefault();
-        var row = btn.closest('tr[data-product]');
-        var pid = row ? parseInt(row.getAttribute('data-product'), 10) : 0;
+        var container = btn.closest('tr[data-product], .card[data-product]');
+        var pid = container ? parseInt(container.getAttribute('data-product'), 10) : 0;
 
         try {
             await rest('cart/remove', 'POST', { product_id: pid });
@@ -115,7 +115,7 @@
         }
     });
 
-    // CART: clear
+// CART: clear
     document.addEventListener('click', async function (e) {
         var btn = e.target.closest('.alx-clear-cart');
         if (!btn) return;

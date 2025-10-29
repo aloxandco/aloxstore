@@ -2,6 +2,7 @@
 namespace AloxStore\Cart;
 
 use AloxStore\Tax\Vat;
+use AloxStore\Core\Helpers;
 
 if (!defined('ABSPATH')) exit;
 
@@ -16,9 +17,8 @@ class CartPricing
         $gross_total  = 0;
         $totals_by_rate = [];
 
-        // Normalize input: accept either ['items'] or ['lines'] from saved cart
+        // Normalize input
         if (empty($cart['lines']) && !empty($cart['items']) && is_array($cart['items'])) {
-            // Convert legacy or raw cart structure
             $cart['lines'] = [];
             foreach ($cart['items'] as $item) {
                 $cart['lines'][] = [
@@ -28,32 +28,31 @@ class CartPricing
             }
         }
 
-// Ensure $cart['lines'] exists and is an array
         if (empty($cart['lines']) || !is_array($cart['lines'])) {
             $cart['lines'] = [];
         }
-
 
         // === LINE CALCULATION ===
         foreach ($cart['lines'] as &$line) {
             $pid = (int)($line['product_id'] ?? 0);
             $qty = max(1, (int)($line['qty'] ?? 1));
 
-            // Force currency to global store currency
             $line['currency'] = $currency;
 
-            // Get product base price
+            // === Smart product pricing ===
             $unit_cents = (int)($line['unit_cents'] ?? 0);
             if ($pid && $unit_cents <= 0) {
-                $unit_cents = (int)get_post_meta($pid, 'price_cents', true);
+                $unit_cents = Helpers::get_product_price_cents($pid);
             }
 
-            // VAT rate (default to 0 if disabled)
+            // VAT rate (default 0 if disabled)
             $vat_rate = ($vat_mode === 'enabled')
-                ? (isset($line['vat_rate_percent']) ? (float)$line['vat_rate_percent'] : (float)get_post_meta($pid, 'vat_rate_percent', true))
+                ? (isset($line['vat_rate_percent'])
+                    ? (float)$line['vat_rate_percent']
+                    : (float)get_post_meta($pid, 'vat_rate_percent', true))
                 : 0.0;
 
-            // Compute VAT/net/gross depending on store setting
+            // === Compute VAT and totals ===
             $calc = Vat::compute_line($unit_cents, $vat_rate, $include_tax);
             $unit_net   = $calc['net'];
             $unit_tax   = $calc['tax'];
@@ -103,7 +102,7 @@ class CartPricing
             $totals_by_rate[$shipping_vat_rate] = ($totals_by_rate[$shipping_vat_rate] ?? 0) + $shipping_net;
         }
 
-        // === VAT BREAKDOWN (if active) ===
+        // === VAT BREAKDOWN ===
         $tax_cents = 0;
         $cart['tax_breakdown'] = [];
 
@@ -125,7 +124,6 @@ class CartPricing
             ? $gross_total + $shipping_gross
             : $total_net + $tax_cents;
 
-        // === FINAL CART STRUCTURE ===
         $cart['currency']        = $currency;
         $cart['subtotal_cents']  = $net_total;
         $cart['shipping_cents']  = $shipping_net;

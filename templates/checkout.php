@@ -25,7 +25,7 @@ if (!empty($cart_raw['items']) && empty($cart_raw['lines'])) {
                 'product_id' => $pid,
                 'qty'        => $qty,
                 'title'      => get_the_title($pid),
-                'unit_cents' => (int)get_post_meta($pid, 'price_cents', true),
+                'unit_cents' => Helpers::get_product_price_cents($pid),
                 'vat_rate_percent' => (float)get_post_meta($pid, 'vat_rate_percent', true),
             ];
         }
@@ -104,7 +104,7 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
         <div class="row g-4">
             <!-- Left Column: Billing & Shipping Form -->
             <div class="col-lg-7">
-                <div class="card border-0 shadow-sm">
+                <div class="card">
                     <div class="card-body">
                         <!-- Contact / Billing Info -->
                         <h6 class="fw-semibold mb-3 text-primary"><?php esc_html_e('Billing Details', 'aloxstore'); ?></h6>
@@ -266,7 +266,7 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
 
             <!-- Right Column: Order Summary -->
             <div class="col-lg-5">
-                <div class="card shadow-sm border-0 h-100">
+                <div class="card">
                     <div class="card-body">
                         <h6 class="fw-semibold mb-3 text-primary"><?php esc_html_e('Order Summary', 'aloxstore'); ?></h6>
 
@@ -275,30 +275,83 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
                         <?php else : ?>
                             <ul class="list-group list-group-flush mb-3">
                                 <?php foreach ($lines as $line) :
-                                    $title = $line['title'] ?? '';
-                                    $qty   = (int)($line['qty'] ?? 1);
-                                    $price = $incl_vat
+                                    $pid       = $line['product_id'] ?? 0;
+                                    $title     = $line['title'] ?? '';
+                                    $qty       = (int)($line['qty'] ?? 1);
+                                    $permalink = get_permalink($pid);
+                                    $thumb     = get_the_post_thumbnail_url($pid, 'thumbnail');
+
+                                    // Effective and regular prices
+                                    $regular_cents = (int)get_post_meta($pid, 'price_cents', true);
+                                    $sale_cents    = (int)get_post_meta($pid, 'sale_price_cents', true);
+                                    $sale_start    = get_post_meta($pid, 'sale_start', true);
+                                    $sale_end      = get_post_meta($pid, 'sale_end', true);
+
+                                    $now = current_time('timestamp');
+                                    $sale_active = $sale_cents > 0 &&
+                                        (empty($sale_start) || strtotime($sale_start) <= $now) &&
+                                        (empty($sale_end) || strtotime($sale_end) >= $now);
+
+                                    // Actual computed prices from CartPricing
+                                    $unit_price_cents = $incl_vat
+                                        ? (int)($line['unit_gross_cents'] ?? 0)
+                                        : (int)($line['unit_net_cents'] ?? 0);
+                                    $line_total_cents = $incl_vat
                                         ? (int)($line['line_gross_cents'] ?? 0)
                                         : (int)($line['line_net_cents'] ?? 0);
+
+                                    $unit_txt = Helpers::format_money($unit_price_cents);
+                                    $line_txt = Helpers::format_money($line_total_cents);
                                     ?>
                                     <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <div class="fw-semibold"><?php echo esc_html($title); ?></div>
-                                            <small class="text-muted"><?php echo sprintf(esc_html__('Qty: %d', 'aloxstore'), $qty); ?></small>
+                                        <div class="d-flex align-items-center">
+                                            <!-- Thumbnail -->
+                                            <?php if ($thumb): ?>
+                                                <a href="<?php echo esc_url($permalink); ?>" class="me-3">
+                                                    <img src="<?php echo esc_url($thumb); ?>" alt="" class="rounded" width="60" height="60">
+                                                </a>
+                                            <?php endif; ?>
+
+                                            <!-- Product Info -->
+                                            <div>
+                                                <a href="<?php echo esc_url($permalink); ?>" class="fw-semibold text-decoration-none text-dark d-block mb-1">
+                                                    <?php echo esc_html($title); ?>
+                                                </a>
+                                                <small class="text-muted d-block mb-1"><?php echo sprintf(esc_html__('Qty: %d', 'aloxstore'), $qty); ?></small>
+
+                                                <?php if ($sale_active && $sale_cents < $regular_cents): ?>
+                                                    <div class="text-danger fw-semibold">
+                                                        <?php echo Helpers::format_money($sale_cents); ?>
+                                                    </div>
+                                                    <div class="text-muted small">
+                                                        <del><?php echo Helpers::format_money($regular_cents); ?></del>
+                                                        <span class="ms-1"><?php echo esc_html($vat_label); ?></span>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <small class="text-muted">
+                                                        <?php echo esc_html($unit_txt . ' ' . $vat_label); ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                            </div>
                                         </div>
-                                        <div><?php echo esc_html(Helpers::format_money($price)); ?></div>
+
+                                        <!-- Line Total -->
+                                        <div class="fw-semibold text-end">
+                                            <?php echo esc_html($line_txt); ?>
+                                        </div>
                                     </li>
                                 <?php endforeach; ?>
                             </ul>
 
+                            <!-- Totals identical to cart -->
                             <div class="border-top pt-3 small">
                                 <p class="d-flex justify-content-between mb-2">
                                     <span><?php esc_html_e('Subtotal:', 'aloxstore'); ?></span>
-                                    <span><?php echo esc_html(Helpers::format_money($subtotal)); ?></span>
+                                    <span><?php echo esc_html(Helpers::format_money((int)($cart['subtotal_cents'] ?? 0))); ?></span>
                                 </p>
                                 <p class="d-flex justify-content-between mb-2">
                                     <span><?php esc_html_e('Shipping:', 'aloxstore'); ?></span>
-                                    <span><?php echo esc_html(Helpers::format_money($shipping)); ?></span>
+                                    <span><?php echo esc_html(Helpers::format_money((int)($cart['shipping_cents'] ?? 0))); ?></span>
                                 </p>
 
                                 <?php if ($vat_mode !== 'none' && !empty($cart['tax_breakdown'])) : ?>
@@ -312,17 +365,17 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
 
                                 <p class="d-flex justify-content-between fw-bold border-top pt-2 mt-2 fs-5">
                                     <span><?php esc_html_e('Total:', 'aloxstore'); ?></span>
-                                    <span><?php echo esc_html(Helpers::format_money($total)); ?></span>
+                                    <span><?php echo esc_html(Helpers::format_money((int)($cart['total_cents'] ?? 0))); ?></span>
                                 </p>
                             </div>
                         <?php endif; ?>
 
                         <div class="mt-5 text-center">
                             <button class="btn btn-primary alx-checkout-submit w-100">
-                                <i class="bi bi-lock-fill me-2"></i>
-                                <?php esc_html_e('Continue to Secure Stripe Payment', 'aloxstore'); ?>
+                                <i class="bi bi-credit-card me-2"></i>
+                                <?php esc_html_e('Secure Stripe Payment', 'aloxstore'); ?>
                             </button>
-                            <div class="text-success small mt-2">
+                            <div class="text-success small mt-3">
                                 <i class="bi bi-shield-check me-1"></i>
                                 <?php esc_html_e('Your payment is protected by 256-bit SSL encryption.', 'aloxstore'); ?>
                             </div>
@@ -333,6 +386,7 @@ $cards_img_url = plugins_url('assets/images/cards-icons.png', WP_PLUGIN_DIR . '/
                     </div>
                 </div>
             </div>
+
         </div>
     </form>
 </div>

@@ -1,3 +1,15 @@
 .aloxstore-grid .card { border: 1px solid #e5e5e5; }
 .aloxstore-grid .card-img-top img { width: 100%; height: auto; display:block; }
 .aloxstore-grid .btn { cursor: pointer; }
+
+.card {border: 1px solid #eeeeee; border-radius: 0.5rem;}
+
+.alx-ellipsis-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /*max-height: 4.5em; /* roughly 3 lines at normal text size */
+    /*line-height: 1.5em;*/
+}
